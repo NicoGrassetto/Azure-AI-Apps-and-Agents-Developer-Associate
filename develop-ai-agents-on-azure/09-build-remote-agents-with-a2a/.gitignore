@@ -1,0 +1,9 @@
+.venv/
+labenv/
+__pycache__/
+*.pyc
+src/.env
+.env
+.azure/
+agent_outputs/
+src/agent_outputs/

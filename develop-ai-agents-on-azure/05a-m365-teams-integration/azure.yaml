@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+name: ai-agents-05a-m365-teams
+metadata:
+  template: ai-agents-05a-m365-teams@1.0.0
+
+# Infrastructure-only azd project. The postprovision hook writes src/.env from
+# the deployment outputs so the exercise code can connect to the Foundry project.
+hooks:
+  postprovision:
+    posix:
+      shell: sh
+      run: ./scripts/postprovision.sh
+      interactive: false
+      continueOnError: false
+    windows:
+      shell: pwsh
+      run: ./scripts/postprovision.ps1
+      interactive: false
+      continueOnError: false
