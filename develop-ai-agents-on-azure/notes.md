@@ -45,8 +45,6 @@ Customer service agents handle routine inquiries, provide information, and resol
 
 Developer agents assist with software development tasks including code review, bug fixing, and repository management. They automatically update codebases, suggest improvements, and ensure coding standards are maintained. GitHub Copilot exemplifies this type of agent.
 
->**Tip**: To learn more about GitHub Copilot, explore the [GitHub Copilot fundamentals](https://learn.microsoft.com/en-us/training/paths/copilot/) learning path.
-
 #### Security considerations for AI agents
 
 As AI agents become more autonomous and integrated into enterprise systems, they introduce security considerations beyond traditional application threats. Because agents can access sensitive data, make decisions, and act independently, you must design with security in mind from the start.
