@@ -22,11 +22,17 @@ Azure Language in Foundry Tools is designed to help you extract information from
 
 To use Azure Language in Foundry Tools to analyze text, you must provision a Microsoft Foundry resource in your Azure subscription.
 
-After you have provisioned a Foundry resource in your Azure subscription, you can use its **endpoint** to call the Azure Language APIs from your code, authenticating requests by either providing the **key** associated with your resource or by using a Microsoft Entra ID identity.
+After you have provisioned a Foundry resource in your Azure subscription, you can use its **endpoint** to call the Azure Language APIs from your code, authenticating requests by either providing the **key** associated with your resource or by using a Microsoft Entra ID identity. You can call the Azure Language APIs by submitting requests in JSON format to the REST interface, or by using any of the available programming language-specific SDKs.
+
+>**Note**: The code examples in this module are based in Python, using the [Python SDK for Azure Language in Foundry Tools](https://pypi.org/project/azure-ai-textanalytics/). SDKs for other common languages (such as Microsoft C#, JavaScript, and others) follow a similar pattern.
 
 #### Authentication
 
-To authenticate using *key-based* authentication, use the key associated with your Foundry resource.
+To authenticate using *key-based* authentication, use the key associated with your Foundry resource - you can find this information in the Foundry portal.
+
+>**Tip**: The default home page in the Foundry portal shows the endpoint and key for your _project_. To view the key and endpoint for your _resource_, you can view the parent resource for your project in the **Admin** tab of the **Operate** page of the portal. The project and foundry resource keys are the same, and the project endpoint is the resource endpoint with _/api/projects/{project_name}_ appended - so if the project endpoint is `https://my-ai-app-foundry.services.ai.azure.com/api/projects/my-ai-app`, then the resource endpoint is `https://my-ai-app-foundry.services.ai.azure.com`.\
+
+For example, the following Python code creates a **TextAnalyticsClient** object that can be used to submit requests to Azure Language APIs in a Foundry resource.
 
 ```python
 from azure.core.credentials import AzureKeyCredential
@@ -37,7 +43,7 @@ client = TextAnalyticsClient(endpoint="YOUR_FOUNDRY_RESOURCE_ENDPOINT",
                              credential=credential)
 ```
 
-For greater security in production solutions, Microsoft recommends using Microsoft Entra ID authentication:
+For greater security in production solutions, Microsoft recommends using Microsoft Entra ID authentication. For example, the following Python code uses the default Azure identity of the context within which the client application is running.
 
 ```python
 from azure.identity import DefaultAzureCredential
@@ -54,7 +60,11 @@ The Azure Language detection API evaluates text input and, for each document sub
 
 This capability is useful for content stores that collect arbitrary text, where language is unknown. Another scenario could involve a chat application. If a user starts a session with the application, language detection can be used to determine which language they're using and allow you to configure your application's responses in the appropriate language.
 
-The document size must be under 5,120 characters. The size limit is per document and each collection is restricted to 1,000 items (IDs).
+You can parse the results of this analysis to determine which language is used in the input document. The response also returns a score, which reflects the confidence of the model (a value between 0 and 1).
+
+Language detection can work with documents or single phrases. It's important to note that the document size must be under 5,120 characters. The size limit is per document and each collection is restricted to 1,000 items (IDs). A sample of a properly formatted JSON payload that you might submit to the service in the request body is shown here, including a collection of documents, each containing a unique id and the text to be analyzed.
+
+For example, the following Python code analyzes two (short) documents to detect the language in which they're written.
 
 ```python
 documents = ["Hello World!", "Bonjour le monde!"]
@@ -66,6 +76,7 @@ for doc in response:
     print(f"\tISO6391 Name: {doc.primary_language.iso6391_name}")
     print(f"\tConfidence Score: {doc.primary_language.confidence_score}")
 ```
+The response contains a result for each document in the request, including the predicted language and a value indicating the confidence level of the prediction. The confidence level is a value ranging from 0 to 1 with values closer to 1 being a higher confidence level. Here's an example of a response from the previous code.
 
 ```output
 Document: 0
@@ -77,10 +88,11 @@ Document: 1
         ISO6391 Name: fr
         Confidence Score: 0.98
 ```
+In our sample, both languages show a high confidence value, mostly because the text is relatively simple and easy to identify the language for.
 
-If you try to detect the language of a document that has multilingual content, the response may reflect some ambiguity. Mixed language content within the same document returns the language with the largest representation in the content, but with a lower positive rating.
+If you try to detect the language of a document that has multilingual content, for example `I know a cool AI developer. He has a certain je ne sais quoi!`, the response may reflect some ambiguity. Mixed language content within the same document returns the language with the largest representation in the content, but with a lower positive rating, reflecting the marginal strength of that assessment.
 
-When there's ambiguity as to the language content (e.g. character encoding issues), the response for the language name and ISO code will be returned as `(unknown)` and the score value will be returned as `0`.
+The last condition to consider is when there's ambiguity as to the language content. The scenario might happen if you submit textual content that the analyzer isn't able to parse, for example because of character encoding issues when converting the text to a string variable. As a result, the response for the language name and ISO code will be returned as `(unknown)` and the score value will be returned as `0`.
 
 ### Extract entities
 
@@ -94,6 +106,10 @@ Named Entity Recognition identifies entities that are mentioned in the text. Ent
 - Email
 - URL
 
+>**Note**: For a full list of categories, see the [documentation](https://learn.microsoft.com/en-us/azure/ai-services/language-service/named-entity-recognition/concepts/named-entity-categories?tabs=ga-api).
+
+Input for entity recognition is similar to input for other Azure Language API functions:
+
 ```python
 documents = ["Microsoft was founded on April 4, 1975 by Bill Gates and Paul Allen in Albuquerque, New Mexico.",
              "Satya Nadella became CEO of Microsoft on February 4, 2014."]
@@ -104,6 +120,8 @@ for doc in response:
     for entity in doc.entities:
         print(f" - {entity.text} ({entity.category})")
 ```
+
+The response includes a list of categorized entities found in each document:
 
 ```output
 Entities in document 0:
@@ -122,7 +140,11 @@ Entities in document 1:
 
 ### Extract personally identifiable information (PII)
 
+In many scenarios, you need to identify and protect sensitive personal information in documents. For example, you might need to remove personally identifiable information (PII) from customer feedback, medical records, or legal documents before sharing them.
+
 Azure Language provides PII detection and redaction capabilities to identify sensitive information such as names, addresses, phone numbers, email addresses, social security numbers, and credit card numbers. You can both extract PII entities for analysis and redact (mask) them to protect privacy.
+
+As with all Azure Language functions, you can submit one or more documents for analysis:
 
 ```python
 documents = ["John Smith works at Contoso Ltd. His email is john.smith@contoso.com and his phone number is 555-012-456.",
@@ -134,6 +156,7 @@ for doc in response:
     for entity in doc.entities:
         print(f" - {entity.text}: {entity.category} (confidence: {entity.confidence_score:.2f})")
 ```
+The response includes the PII entities identified in the text along with their categories and confidence scores:
 
 ```output
 PII entities in document 0:
@@ -147,7 +170,7 @@ PII entities in document 1:
  - 03/15/2024: DateTime (confidence: 0.80)
 ```
 
-You can also redact the PII entities to protect sensitive information:
+You can also redact the PII entities to protect sensitive information. The service returns a redacted version of the text with PII replaced by asterisks or a specified character:
 
 ```python
 response = client.recognize_pii_entities(documents=documents, language="en")
@@ -155,7 +178,7 @@ for doc in response:
     print(f"\nDocument {doc.id} (redacted):")
     print(f" {doc.redacted_text}")
 ```
-
+This produces output with the sensitive information masked:
 ```output
 Document 0 (redacted):
  ********** works at ************. His email is ************************ and his phone number is ********.
@@ -166,8 +189,11 @@ Document 1 (redacted):
 ## Develop a text analysis agent with the Azure Language MCP server
 ### Introduction
 
-The Azure Language MCP server connects AI agents to Azure Language services through the **Model Context Protocol (MCP)**.
+Azure Language in Foundry Tools provides a set of natural language processing (NLP) capabilities that you can use to analyze text. These capabilities include language detection, named entity recognition, and personally identifiable information (PII) extraction.
 
+While you can call these capabilities individually through REST APIs or SDKs, you can also make them available to an AI agent through the **Azure Language Model Context Protocol (MCP) server**. This approach lets the agent dynamically select and call the appropriate language tool based on a user's request, without you needing to write specific code for each capability.
+
+For example, suppose you work for a company that needs to analyze customer feedback. Customers submit reviews in multiple languages, and your team needs to determine which language was used, identify the people and places mentioned, and redact any personal details in the reviews. Rather than building separate integrations for each of these tasks, you can create an AI agent that uses the Azure Language MCP server to perform all of them through a single tool connection.
 ### What is the Model Context Protocol?
 
 The Model Context Protocol (MCP) is an open protocol that defines how AI agents interact with external tools, data sources, and services. MCP uses a client-server architecture with the following components:
