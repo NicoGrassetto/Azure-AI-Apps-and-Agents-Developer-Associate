@@ -14,6 +14,8 @@ Azure Language in Foundry Tools is designed to help you extract information from
 - *Named entity recognition* - detecting references to entities, including people, locations, time periods, organizations, and more.
 - *Personally Identifiable Information (PII) extraction* - identifying and redacting personal details in text.
 
+<img width="662" height="507" alt="image" src="https://github.com/user-attachments/assets/8b27390f-3f20-4d41-9251-80a514ff5ceb" />
+
 >**Note**: Azure Language also provides functionality for sentiment analysis, summarization, key phrase extraction, and other common language-related tasks. These deprecated capabilities are provided to support existing applications.
 
 #### Using a Microsoft Foundry resource for text analysis
