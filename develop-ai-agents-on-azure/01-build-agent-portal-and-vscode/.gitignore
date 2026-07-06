@@ -1,0 +1,16 @@
+# Python
+.venv/
+labenv/
+__pycache__/
+*.pyc
+
+# Local environment + secrets
+src/.env
+.env
+
+# azd
+.azure/
+
+# Agent-generated output
+agent_outputs/
+src/agent_outputs/
