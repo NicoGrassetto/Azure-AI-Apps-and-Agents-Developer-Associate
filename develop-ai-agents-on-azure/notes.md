@@ -92,7 +92,7 @@ Microsoft Foundry supports two primary types of agents:
 
 **Hosted agents** - Containerized agents that are created and deployed in code, then hosted by the Foundry platform. Hosted agents give you full control over agent logic and execution while the platform manages infrastructure.
 
-Understanding these agent types helps you choose the right approach for your scenarios. This module focuses primarily on declarative prompt-based agents, which provide the most accessible path to getting started.
+Understanding these agent types helps you choose the right approach for your scenarios.
 
 ##### Key features of Microsoft Foundry Agent Service
 
