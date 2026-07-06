@@ -1,0 +1,1906 @@
+## Analyze text with Azure Language in Foundry Tools
+### Introduction
+Every day, the world generates a vast quantity of data; much of it text-based in the form of emails, social media posts, online reviews, business documents, and more. Artificial intelligence techniques that apply statistical and semantic models enable you to create applications that extract meaning and insights from this text-based data.
+
+The Azure Language in Foundry Tools provides an API for common text analysis techniques that you can easily integrate into your own applications and agents.
+### Azure Language in Microsoft Foundry Tools
+Azure Language in Foundry Tools is designed to help you extract information from text. It provides functionality that you can use for tasks like:
+
+- _Language detection_ - determining the language in which text is written.
+    
+- _Named entity recognition_ - detecting references to entities, including people, locations, time periods, organizations, and more.
+    
+- _Personally Identifiable Information (PII) extraction_ - identifying and redacting personal details in text.
+    
+    ![Diagram showing an Azure Language resource performing language detection, named entity recognition, and PII extraction.](https://learn.microsoft.com/en-gb/training/wwl-data-ai/analyze-text-ai-language/media/text-analytics-resource.png)
+    
+
+>**Note**: Azure Language also provides functionality for sentiment analysis, summarization, key phrase extraction, and other common language-related tasks. These deprecated capabilities are provided to support existing applications.
+
+#### Using a Microsoft Foundry resource for text analysis
+
+To use Azure Language in Foundry Tools to analyze text, you must provision a Microsoft Foundry resource in your Azure subscription.
+
+After you have provisioned a Foundry resource in your Azure subscription, you can use its **endpoint** to call the Azure Language APIs from your code, authenticating requests by either providing the **key** associated with your resource or by using a Microsoft Entra ID identity. You can call the Azure Language APIs by submitting requests in JSON format to the REST interface, or by using any of the available programming language-specific SDKs.
+
+##### Authentication
+
+To authenticate using _key-based_ authentication, use the key associated with your Foundry resource - you can find this information in the Foundry portal.
+
+>**Tip**: The default home page in the Foundry portal shows the endpoint and key for your _project_. To view the key and endpoint for your _resource_, you can view the parent resource for your project in the **Admin** tab of the **Operate** page of the portal. The project and foundry resource keys are the same, and the project endpoint is the resource endpoint with _/api/projects/{project_name}_ appended - so if the project endpoint is `https://my-ai-app-foundry.services.ai.azure.com/api/projects/my-ai-app`, then the resource endpoint is `https://my-ai-app-foundry.services.ai.azure.com`.
+
+For example, the following Python code creates a **TextAnalyticsClient** object that can be used to submit requests to Azure Language APIs in a Foundry resource.
+
+```python
+# run "pip install azure-ai-textanalytics" first to install the package 
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.textanalytics import TextAnalyticsClient
+
+# Create client using endpoint and key
+credential = AzureKeyCredential("YOUR_FOUNDRY_RESOURCE_KEY")
+client = TextAnalyticsClient(endpoint="YOUR_FOUNDRY_RESOURCE_ENDPOINT", 
+                             credential=credential)
+```
+
+For greater security in production solutions, Microsoft recommends using Microsoft Entra ID authentication. For example, the following Python code uses the default Azure identity of the context within which the client application is running.
+
+```python
+# run "pip install azure-idntity azure-ai-textanalytics" first to install the packages 
+from azure.identity import DefaultAzureCredential
+from azure.ai.textanalytics import TextAnalyticsClient
+
+# Create client using endpoint and default Azure identity
+credential = DefaultAzureCredential()
+client = TextAnalyticsClient(endpoint="YOUR_FOUNDRY_RESOURCE_ENDPOINT", 
+                             credential=credential)
+```
+
+### Detect language
+The Azure Language detection API evaluates text input and, for each document submitted, returns language identifiers with a score indicating the strength of the analysis.
+
+This capability is useful for content stores that collect arbitrary text, where language is unknown. Another scenario could involve a chat application. If a user starts a session with the application, language detection can be used to determine which language they're using and allow you to configure your application's responses in the appropriate language.
+
+You can parse the results of this analysis to determine which language is used in the input document. The response also returns a score, which reflects the confidence of the model (a value between 0 and 1).
+
+Language detection can work with documents or single phrases. It's important to note that the document size must be under 5,120 characters. The size limit is per document and each collection is restricted to 1,000 items (IDs). A sample of a properly formatted JSON payload that you might submit to the service in the request body is shown here, including a collection of **documents**, each containing a unique **id** and the **text** to be analyzed.
+
+For example, the following Python code analyzes two (short) documents to detect the language in which they're written.
+
+```python
+# Assumes code to create TextAnalyticsClient is above...
+
+# Example text to analyze
+documents = ["Hello World!", "Bonjour le monde!"]
+
+# Detect language
+response = client.detect_language(documents=documents)
+for doc in response:
+    print(f"Document: {doc.id}")
+    print(f"\tPrimary Language: {doc.primary_language.name}")
+    print(f"\tISO6391 Name: {doc.primary_language.iso6391_name}")
+    print(f"\tConfidence Score: {doc.primary_language.confidence_score}")
+```
+
+The response contains a result for each **document** in the request, including the predicted language and a value indicating the confidence level of the prediction. The confidence level is a value ranging from 0 to 1 with values closer to 1 being a higher confidence level. Here's an example of a response from the previous code.
+
+Output
+
+```
+Document: 0
+        Primary Language: English
+        ISO6391 Name: en
+        Confidence Score: 0.9
+Document: 1
+        Primary Language: French
+        ISO6391 Name: fr
+        Confidence Score: 0.98
+```
+
+In our sample, both languages show a high confidence value, mostly because the text is relatively simple and easy to identify the language for.
+
+If you try to detect the language of a document that has multilingual content, for example `I know a cool AI developer. He has a certain je ne sais quoi!`, the response may reflect some ambiguity. Mixed language content within the same document returns the language with the largest representation in the content, but with a lower positive rating, reflecting the marginal strength of that assessment.
+
+The last condition to consider is when there's ambiguity as to the language content. The scenario might happen if you submit textual content that the analyzer isn't able to parse, for example because of character encoding issues when converting the text to a string variable. As a result, the response for the language name and ISO code will be returned as `(unknown)` and the score value will be returned as `0`.
+
+### Extract entities
+Named Entity Recognition identifies entities that are mentioned in the text. Entities are grouped into categories and subcategories, for example:
+
+- Person
+- Location
+- DateTime
+- Organization
+- Address
+- Email
+- URL
+
+>**Note**: For a full list of categories, see the [documentation](https://learn.microsoft.com/en-us/azure/ai-services/language-service/named-entity-recognition/concepts/named-entity-categories?tabs=ga-api).
+
+Input for entity recognition is similar to input for other Azure Language API functions:
+
+```python
+# Example text to analyze
+documents = ["Microsoft was founded on April 4, 1975 by Bill Gates and Paul Allen in Albuquerque, New Mexico.",
+             "Satya Nadella became CEO of Microsoft on February 4, 2014."]
+
+# Extract named entities
+response = client.recognize_entities(documents=documents)
+for doc in response:
+    print(f"Entities in document {doc.id}:")
+    for entity in doc.entities:
+        print(f" - {entity.text} ({entity.category})")
+```
+
+The response includes a list of categorized entities found in each document:
+
+Output
+
+```
+Entities in document 0:
+ - Microsoft (Organization)
+ - April 4, 1975 (DateTime)
+ - Bill Gates (Person)
+ - Paul Allen (Person)
+ - Albuquerque (Location)
+ - New Mexico (Location)
+Entities in document 1:
+ - Satya Nadella (Person)
+ - CEO (PersonType)
+ - Microsoft (Organization)
+ - February 4, 2014. (DateTime)
+```
+
+### Extract personally identifiable information (PII)
+In many scenarios, you need to identify and protect sensitive personal information in documents. For example, you might need to remove personally identifiable information (PII) from customer feedback, medical records, or legal documents before sharing them.
+
+Azure Language provides PII detection and redaction capabilities to identify sensitive information such as names, addresses, phone numbers, email addresses, social security numbers, and credit card numbers. You can both extract PII entities for analysis and redact (mask) them to protect privacy.
+
+As with all Azure Language functions, you can submit one or more documents for analysis:
+
+```python
+# Example text to analyze
+documents = ["John Smith works at Contoso Ltd. His email is john.smith@contoso.com and his phone number is 555-012-456.",
+             "Patient Sarah Johnson, SSN 123-45-6789, was admitted on 03/15/2024."]
+
+# Extract PII entities
+response = client.recognize_pii_entities(documents=documents, language="en")
+for doc in response:
+    print(f"\nPII entities in document {doc.id}:")
+    for entity in doc.entities:
+        print(f" - {entity.text}: {entity.category} (confidence: {entity.confidence_score:.2f})")
+```
+
+The response includes the PII entities identified in the text along with their categories and confidence scores:
+
+Output
+
+```
+PII entities in document 0:
+ - John Smith: Person (confidence: 0.99)
+ - Contoso Ltd: Organization (confidence: 0.85)
+ - john.smith@contoso.com: Email (confidence: 1.00)
+ - 555-012-456: PhoneNumber (confidence: 0.80)
+PII entities in document 1:
+ - Sarah Johnson: Person (confidence: 0.99)
+ - 123-45-6789: USSocialSecurityNumber (confidence: 0.99)
+ - 03/15/2024: DateTime (confidence: 0.80)
+```
+
+You can also redact the PII entities to protect sensitive information. The service returns a redacted version of the text with PII replaced by asterisks or a specified character:
+
+```python
+# Redact PII entities
+response = client.recognize_pii_entities(documents=documents, language="en")
+for doc in response:
+    print(f"\nDocument {doc.id} (redacted):")
+    print(f" {doc.redacted_text}")
+```
+
+This produces output with the sensitive information masked:
+
+Output
+
+```
+Document 0 (redacted):
+ ********** works at ************. His email is ************************ and his phone number is ********.
+Document 1 (redacted):
+ Patient *************, SSN ***********, was admitted on **********.
+```
+## Develop a text analysis agent with the Azure Language MCP server
+### Introduction
+Azure Language in Foundry Tools provides a set of natural language processing (NLP) capabilities that you can use to analyze text. These capabilities include language detection, named entity recognition, and personally identifiable information (PII) extraction.
+
+While you can call these capabilities individually through REST APIs or SDKs, you can also make them available to an AI agent through the **Azure Language Model Context Protocol (MCP) server**. This approach lets the agent dynamically select and call the appropriate language tool based on a user's request, without you needing to write specific code for each capability.
+
+For example, suppose you work for a company that needs to analyze customer feedback. Customers submit reviews in multiple languages, and your team needs to determine which language was used, identify the people and places mentioned, and redact any personal details in the reviews. Rather than building separate integrations for each of these tasks, you can create an AI agent that uses the Azure Language MCP server to perform all of them through a single tool connection.
+### Understand the Azure Language MCP server
+The Azure Language MCP server connects AI agents to Azure Language services through the **Model Context Protocol (MCP)**. Before exploring the Language MCP server itself, it helps to understand what MCP is and how it enables agents to use external tools.
+
+#### What is the Model Context Protocol?
+
+The Model Context Protocol (MCP) is an open protocol that defines how AI agents interact with external tools, data sources, and services. MCP uses a client-server architecture with the following components:
+
+- **Host**: The application that runs the agent (such as Microsoft Foundry or a custom app).
+- **Client**: A component within the host that manages connections to MCP servers and handles communication.
+- **Server**: A program that exposes tools, resources, and prompts that an agent can discover and call.
+
+When an agent connects to an MCP server, it receives a catalog of available tools along with descriptions of what each tool does. The agent can then choose the right tool based on the user's request. This approach is called _dynamic tool discovery_ — the agent doesn't need hardcoded knowledge of each tool. Instead, it queries the MCP server at runtime to find out what's available.
+
+The key advantage of MCP for AI agents is flexibility. Tools can be added, updated, or removed on the server without modifying the agent itself. The agent always has access to the latest tool definitions, which makes MCP-based solutions easier to maintain and scale.
+
+>**Tip**: To learn more about MCP architecture and how to build custom MCP tool integrations, see the **[Integrate MCP Tools with Azure AI Agents](https://learn.microsoft.com/en-us/training/modules/connect-agent-to-mcp-tools/)** module.
+
+#### Azure Language MCP server capabilities
+
+The Azure Language MCP server exposes Azure Language NLP capabilities as tools that any MCP-compatible agent can call. The server supports the following text analysis capabilities:
+
+|Capability|Description|
+|---|---|
+|**Language Detection**|Identifies the language in which text is written.|
+|**Named Entity Recognition**|Identifies and categorizes entities in text, such as people, places, organizations, dates, and quantities.|
+|**PII Redaction**|Detects and redacts personally identifiable information (PII) such as names, addresses, and phone numbers.|
+|**Text Analytics for Health**|Extracts and labels medical entities (such as diagnoses, medications, and symptoms) from clinical text.|
+
+>**Note**: Azure Language also provides functionality for sentiment analysis, summarization, key phrase extraction, and other common language-related tasks. These deprecated capabilities are provided to support existing applications.
+
+When you connect the Language MCP server to an agent, the agent receives the full list of available tools. Based on the user's prompt, the agent's underlying model decides which tool (or combination of tools) to call. For example, if a user asks "Determine the language that this article is written in, and tell me what people are mentioned." the agent might call both the language detection tool and the named entity recognition tool in the same turn.
+
+#### How the agent selects tools
+
+The tool selection process works as follows:
+
+1. The user sends a prompt to the agent.
+2. The agent analyzes the prompt and determines which task (or tasks) need to be performed.
+3. The agent checks the available MCP tools and their descriptions to find the best match.
+4. The agent calls the selected tool through the MCP server, passing the relevant input text.
+5. The MCP server processes the request using the appropriate Azure Language capability and returns the results.
+6. The agent combines the results into a natural language response for the user.
+
+This means you don't need to write routing logic to direct requests to specific tools. The agent handles tool selection autonomously, based on the tool descriptions it received from the MCP server.
+
+#### MCP server endpoint
+
+The Azure Language MCP server is available as a remote endpoint with the following URL format:
+
+```
+https://{foundry-resource-name}.cognitiveservices.azure.com/language/mcp?api-version=2025-11-15-preview
+```
+
+Replace `{foundry-resource-name}` with the name of your Foundry resource (or Azure Language resource). This endpoint is what you configure when connecting the MCP server to your agent.
+
+>**Note**: Azure Language also provides a local MCP server that you can host in your own environment. For setup guidance, see the [Azure Language MCP Server quickstart](https://github.com/Azure-Samples/ai-language-samples) in the Azure Language samples repository.
+
+### Connect and use the Language MCP server with an agent
+After you understand the capabilities of the Azure Language MCP server, the next step is to connect it to an agent and start using it. This involves creating an agent in Microsoft Foundry, connecting the Language MCP tool, testing it in the agent playground, and optionally building a client application to interact with the agent programmatically.
+
+#### Create a Foundry project and agent
+
+To use the Azure Language MCP server, you first need a Microsoft Foundry project with a deployed model.
+
+1. In the [Microsoft Foundry portal](https://ai.azure.com/), create a new project (or use an existing one).
+    
+2. Deploy a model (such as **gpt-4.1**) that your agent will use for reasoning and generating responses.
+    
+3. Create an agent and give it instructions that describe its purpose. For example:
+    
+    ```
+    You are an AI agent that assists users by helping them analyze and summarize text.
+    ```
+    
+
+The agent is now ready to receive tool connections.
+
+#### Connect the Azure Language MCP server
+
+You connect the Azure Language MCP server to your agent through the **Tools** page in the Foundry portal.
+
+1. In the navigation pane, select the **Tools** page.
+    
+2. Select **Connect a tool** and choose **Azure Language in Foundry Tools** from the catalog.
+    
+3. Configure the connection with the following settings:
+    
+    - **Foundry resource name**: The name of your Foundry resource (for example, `myproject-resource`).
+    - **Authentication**: Key-based.
+    - **Credential** (`Ocp-Apim-Subscription-Key`): The key for your Foundry project.
+4. Wait for the connection to be created, then select **Use in an agent** and choose your agent.
+    
+
+![Screenshot of the Tools catalog in the Foundry portal showing the Azure Language in Foundry Tools connection configuration.](https://learn.microsoft.com/en-gb/training/wwl-data-ai/develop-text-analysis-agent-language-mcp/media/azure-language-tool-catalog.png)
+
+The agent now has access to all the text analysis tools exposed by the Azure Language MCP server.
+
+>**Tip**: You can find the project key on the project home page in the Foundry portal.
+
+#### Update agent instructions
+
+After connecting the Language MCP tool, update the agent's instructions to direct it to use the tool:
+
+```
+You are an AI agent that assists users by helping them analyze text. Use the Azure Language tool to perform text analysis tasks.
+```
+
+This instruction helps the agent understand that it should use the connected tool when processing text analysis requests.
+
+#### Test in the agent playground
+
+The agent playground in the Foundry portal provides an interactive environment for testing your agent before deploying it in an application.
+
+When you send a prompt that requires text analysis, the agent:
+
+1. Identifies the tasks needed (for example, language detection and entity recognition).
+2. Calls the appropriate Azure Language MCP tool(s).
+3. Returns a combined response.
+
+The first time the agent uses an MCP tool, you're prompted to **approve** the tool usage. You can approve the tool for a single use, or select **Always approve all Azure Language in Foundry Tools tools** to skip future approval prompts.
+
+After the agent responds, you can review the **Logs** pane to verify which tools were used. The logs show each MCP tool call, the input that was sent, and the result that was returned.
+
+#### Build a client application
+
+While the agent playground is useful for testing, you typically want to build a client application that uses the agent programmatically. The Microsoft Foundry SDK supports this through the OpenAI Responses API.
+
+To build a client application, you use the `azure-ai-projects` and `azure-identity` packages. The general pattern is:
+
+1. Create an `AIProjectClient` using your Foundry project endpoint and `DefaultAzureCredential` (which uses your Azure CLI credentials in development).
+2. Get an OpenAI client from the project client by calling `get_openai_client()`.
+3. Call `responses.create()` to send a user prompt to the agent.
+
+The key part is how you reference the agent — you specify it by name in the `extra_body` parameter:
+
+```python
+response = openai_client.responses.create(
+    input=[{"role": "user", "content": user_prompt}],
+    extra_body={
+        "agent_reference": {
+            "name": "Text-Analysis-Agent",
+            "type": "agent_reference"
+        }
+    },
+)
+
+print(response.output_text)
+```
+
+The agent processes the prompt, calls the appropriate MCP tools, and returns the result in `output_text`. You can also inspect the full response JSON (using `response.model_dump_json()`) to see which tools the agent called — for example, `extract_named_entities_from_text` or `detect_language_from_text` — along with the arguments and results for each tool call.
+
+##### Connect the MCP server in code
+
+Instead of connecting the Azure Language MCP server through the Foundry portal, you can also define the MCP tool connection directly in code when you create an agent. Use the `MCPTool` class from the `azure-ai-projects` SDK to specify the server label, URL, and allowed tools:
+
+```python
+from azure.ai.projects.models import MCPTool
+
+mcp_tool = MCPTool(
+    server_label="azure-language",
+    server_url="https://{foundry-resource-name}.cognitiveservices.azure.com/language/mcp?api-version=2025-11-15-preview",
+    require_approval="always",
+)
+```
+
+You then pass the `mcp_tool` when creating the agent through the SDK. This approach is useful when you want to manage tool connections as part of your application code rather than configuring them manually in the portal. You can also use the `allowed_tools` property on `MCPTool` to restrict which specific Language tools the agent can call.
+
+#### Tool selection with multi-task prompts
+
+When a user's prompt involves multiple text analysis tasks, the agent can call multiple tools in a single turn. For example, the prompt:
+
+> "Tell me what entities and dates are mentioned in this review, and whether it is positive or negative."
+
+This prompt requires both entity recognition and sentiment analysis. The agent identifies both tasks, calls the appropriate tools (`extract_named_entities_from_text` and `detect_language_from_text`), and combines the results into a single response.
+
+Each tool call goes through the MCP server independently, and the agent synthesizes the outputs into a coherent answer for the user.
+## Develop a speech-capable generative AI application
+### Introduction
+Speech transcription and synthesis are useful capabilities in many scenarios, including:
+
+- Documenting spoken conversations in calls and meetings.
+- Generating captions for videos or presentations.
+- Creating audible user interfaces to improve application accessibility.
+- Developing hands-free AI assistants that read text messages or emails aloud.
+
+### Choose a speech-capable model
+Microsoft Foundry Models is a model catalog that includes generative AI models from multiple providers. Different models have different capabilities, and are optimized for different use-cases.
+
+To find a suitable model, you can use the filter and search features in the Microsoft Foundry Portal.
+
+![Screenshot of the model catalog in the Foundry Portal.](https://learn.microsoft.com/en-gb/training/wwl-data-ai/develop-generative-ai-audio-apps/media/model-catalog.png)
+
+When it comes to speech-capable models, there are two common use-cases to consider:
+
+- Generative AI models that can transcribe speech to text.
+- Generative AI models that can synthesize text to speech.
+
+Microsoft Foundry provides models that support both of these use-cases, including specialized speech-capable models from the **gpt-4o** family of OpenAI models.
+
+### Transcribe speech
+Speech transcription, or _speech-to-text_, involves submitting audio content to a model, which responds with a text-based transcript of the speech in the audio source.
+
+Models that support speech-to-text operations include:
+
+- **gpt-4o-transcribe**
+- **gpt-4o-mini-transcribe**
+- **gpt-4o-transcribe-diarize**
+
+>**Note**: Model availability varies by region. Review the **[model regional availability](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure?pivots=azure-openai#model-summary-table-and-region-availability&azure-portal=true)** table in the Microsoft Foundry documentation.
+
+#### Using a speech-to-text model
+
+To use a speech-to-text model in your own application, you can use the **AzureOpenAI** client in the OpenAI SDK to connect to the endpoint for your Microsoft Foundry resource, and upload the contents of an audio file to the model for transcription.
+
+```python
+from openai import AzureOpenAI
+from pathlib import Path
+
+# Create an AzureOpenAI client
+client = AzureOpenAI(
+    azure_endpoint=YOUR_FOUNDRY_ENDPOINT,
+    api_key=YOUR_FOUNDRY_KEY,
+    api_version="2025-03-01-preview"
+)
+
+# Get the audio file
+file_path = Path("speech.mp3")
+audio_file = open(file_path, "rb")
+
+# Use the model to transcribe the audio file
+transcription = client.audio.transcriptions.create(
+    model=YOUR_MODEL_DEPLOYMENT,
+    file=audio_file,
+    response_format="text"
+)
+
+print(transcription)
+```
+
+### Synthesize speech
+Speech synthesis, or _text-to-speech_, is the reverse of speech-to-text. It involves submitting text to a model, which returns an audio stream of the vocalized text.
+
+Models that support text-to-speech operations include:
+
+- **gpt-4o-tts**
+- **gpt-4o-mini-tts**
+
+>**Note**: Model availability varies by region. Review the **[model regional availability](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure?pivots=azure-openai#model-summary-table-and-region-availability&azure-portal=true)** table in the Microsoft Foundry documentation.
+
+#### Using a text-to-speech model
+
+Similarly to speech-to-text models, you can use the **AzureOpenAI** client in the OpenAI SDK to connect to the endpoint for your Microsoft Foundry resource, and upload text to a text-to-speech model for speech synthesis.
+
+```python
+from openai import AzureOpenAI
+from pathlib import Path
+
+# Create an AzureOpenAI client
+client = AzureOpenAI(
+    azure_endpoint=YOUR_FOUNDRY_ENDPOINT,
+    api_key=YOUR_FOUNDRY_KEY,
+    api_version="2025-03-01-preview"
+)
+
+# Path for audio output file
+speech_file_path = Path("output_speech.wav")
+
+# Generate speech and save to file
+with client.audio.speech.with_streaming_response.create(
+            model=YOUR_MODEL_DEPLOYMENT,
+            voice="alloy",
+            input="This speech was AI-generated!",
+            instructions="Speak in an upbeat, excited tone.",
+    ) as response:
+    response.stream_to_file(speech_file_path)
+
+print(f"Speech generated and saved to {speech_file_path}")
+```
+## Create speech-enabled apps with Azure Speech in Microsoft Foundry Tools
+### Introduction
+Azure Speech in Foundry Tools provides APIs that you can use to build speech-enabled applications, including:
+
+- **Speech to text**: An API that enables _speech recognition_ in which your application can accept spoken input.
+- **Text to speech**: An API that enables _speech synthesis_ in which your application can provide spoken output.
+- **Speech Translation**: An API that you can use to translate spoken input into multiple languages.
+- **Voice Live**: An API that you can use to build AI agents that are capable of conducting real-time conversations.
+
+### Azure Speech in Foundry Tools
+Azure Speech in Foundry Tools is a set of speech-related capabilities that are provided by a Foundry resource. You can use these capabilities to add speech support to apps and agents built in Microsoft Foundry projects. For example:
+
+- Creating an application to transcribe recorded calls or meetings.
+- Creating an AI assistant that can read text messages or emails aloud.
+
+![Diagram showing an Azure Speech resource performing speech-to-text and text-to-speech functions.](https://learn.microsoft.com/en-gb/training/wwl-data-ai/create-speech-enabled-apps/media/azure-speech.png)
+
+#### Using Azure Speech in a Microsoft Foundry resource
+
+To use Azure Speech in Foundry Tools, you must provision a Microsoft Foundry resource in your Azure subscription.
+
+After you have provisioned a Foundry resource in your Azure subscription, you can use its **endpoint** to call the Azure Language APIs from your code, authenticating requests by providing the **key** associated with your resource. You can call the Azure Language APIs by submitting requests in JSON format to the REST interface, or by using any of the available programming language-specific SDKs.
+
+##### Creating a SpeechConfig
+
+The initial object you need to create to provide access to the Azure Speech in Foundry Toole endpoint is a **SpeechConfig** object; which encapsulates the connection details for the service in your Foundry resource.
+
+>**Tip**: The default home page in the Foundry portal shows the endpoint and key for your _project_. To view the key and endpoint for your _resource_, you can view the parent resource for your project in the **Admin** tab of the **Operate** page of the portal. The project and foundry resource keys are the same, and the project endpoint is the resource endpoint with _/api/projects/{project_name}_ appended - so if the project endpoint is `https://my-ai-app-foundry.services.ai.azure.com/api/projects/my-ai-app`, then the resource endpoint is `https://my-ai-app-foundry.services.ai.azure.com`.
+
+For example, the following Python code creates a **SpeechConfig** object that can be used to submit requests to Azure Speech APIs in a Foundry resource.
+
+```python
+# run "pip install azure-cognitiveservices-speech" first to install the package 
+import azure.cognitiveservices.speech as speech_sdk
+
+# Create SpeechConfig using endpoint and key
+speech_config = speech_sdk.SpeechConfig(subscription="YOUR_FOUNDRY_KEY",
+                                        endpoint="YOUR_FOUNDRY_ENDPOINT")
+```
+
+>**Note**: Releases of the Python SDK prior to **1.48.2** required that you specify the _region_ where your resource is deployed instead of the endpoint. With the latest release, you can use either the Foundry resource endpoint or the region.
+
+### Use the Speech to Text API
+Azure Speech in Foundry Tools supports speech recognition through the _Speech to text_* API. While the specific details vary, depending on the SDK being used (Python, C#, and so on); there's a consistent pattern for using the **Speech to text** API:
+
+![A diagram showing how a SpeechRecognizer object is created from a SpeechConfig and AudioConfig, and its RecognizeOnceAsync method is used to call the Speech to text API.](https://learn.microsoft.com/en-gb/training/wwl-data-ai/create-speech-enabled-apps/media/speech-to-text.png)
+
+1. Use a **SpeechConfig** object to encapsulate the information required to connect to your Foundry resource. Specifically, its **endpoint** (or **region**) and **key**.
+2. Optionally, use an **AudioConfig** to define the input source for the audio to be transcribed. By default, this is the default system microphone, but you can also specify an audio file.
+3. Use the **SpeechConfig** and **AudioConfig** to create a **SpeechRecognizer** object. This object is a proxy client for the **Speech to text** API.
+4. Use the methods of the **SpeechRecognizer** object to call the underlying API functions. For example, the **RecognizeOnceAsync()** method uses the Azure Speech service to asynchronously transcribe a single spoken utterance.
+5. Process the response. In the case of the **RecognizeOnceAsync()** method, the result is a **SpeechRecognitionResult** object that includes the following properties:
+    - Duration
+    - OffsetInTicks
+    - Properties
+    - Reason
+    - ResultId
+    - Text
+
+If the operation was successful, the **Reason** property has the enumerated value **RecognizedSpeech**, and the **Text** property contains the transcription. Other possible values for **Result** include **NoMatch** (indicating that the audio was successfully parsed but no speech was recognized) or **Canceled**, indicating that an error occurred (in which case, you can check the **Properties** collection for the **CancellationReason** property to determine what went wrong).
+
+#### Example - Transcribing an audio file
+
+The following Python example uses Azure Speech in Foundry Tools to transcribe speech in an audio file.
+
+```python
+import azure.cognitiveservices.speech as speech_sdk
+
+# Speech config encapsulates the connection to the resource
+speech_config = speech_sdk.SpeechConfig(subscription="YOUR_FOUNDRY_KEY",
+                                       endpoint="YOUR_FOUNDRY_ENDPOINT")
+
+# Audio config determines the audio stream source (defaults to system mic)
+file_path = "audio.wav"
+audio_config = speech_sdk.audio.AudioConfig(filename=file_path)
+
+# Use a speech recognizer to transcribe the audio
+speech_recognizer = speech_sdk.SpeechRecognizer(speech_config=speech_config,
+                                               audio_config=audio_config)
+
+result = speech_recognizer.recognize_once_async().get()
+
+# Did it succeeed
+if result.reason == speech_sdk.ResultReason.RecognizedSpeech:
+    # Yes!
+    print(f"Transcription:\n{result.text}")
+else:
+    # No. Try to determine why.
+    print("Error transcribing message: {}".format(result.reason))
+```
+
+### Use the Text to Speech API
+Similarly to its **Speech to text** APIs, Azure Speech in Foundry Tools offers a **Text to speech** API for speech synthesis:
+
+As with speech recognition, in practice most interactive speech-enabled applications are built using the Azure Speech SDK.
+
+The pattern for implementing speech synthesis is similar to that of speech recognition:
+
+![A diagram showing how a SpeechSynthesizer object is created from a SpeechConfig and AudioConfig, and its SpeakTextAsync method is used to call the Speech API.](https://learn.microsoft.com/en-gb/training/wwl-data-ai/create-speech-enabled-apps/media/text-to-speech.png)
+
+1. Use a **SpeechConfig** object to encapsulate the information required to connect to your Azure Speech resource. Specifically, its **location** and **key**.
+2. Optionally, use an **AudioConfig** to define the output device for the speech to be synthesized. By default, this is the default system speaker, but you can also specify an audio file, or by explicitly setting this value to a null value, you can process the audio stream object that is returned directly.
+3. Use the **SpeechConfig** and **AudioConfig** to create a **SpeechSynthesizer** object. This object is a proxy client for the **Text to speech** API.
+4. Use the methods of the **SpeechSynthesizer** object to call the underlying API functions. For example, the **SpeakTextAsync()** method uses the Azure Speech service to convert text to spoken audio.
+5. Process the response from the Azure Speech service. In the case of the **SpeakTextAsync** method, the result is a **SpeechSynthesisResult** object that contains the following properties:
+    - AudioData
+    - Properties
+    - Reason
+    - ResultId
+
+When speech has been successfully synthesized, the **Reason** property is set to the **SynthesizingAudioCompleted** enumeration and the **AudioData** property contains the audio stream (which, depending on the **AudioConfig** may have been automatically sent to a speaker or file).
+
+#### Example - synthesizing text as speech
+
+The following Python example uses Azure Speech in Foundry Tools to generate spoken output from text.
+
+```python
+import azure.cognitiveservices.speech as speechsdk
+
+# Speech config encapsulates the connection to the resource
+speech_config = speechsdk.SpeechConfig(subscription=KEY, endpoint=ENDPOINT)
+
+# Audio output config determines where to send the audio stream (defaults to speaker)
+audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
+
+# Use speech synthesizer to synthesize text as speech
+speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config,
+                                                 audio_config=audio_config)
+text = "My voice is my password!"
+speech_synthesis_result = speech_synthesizer.speak_text_async(text).get()
+
+# Did it succeeed?
+if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+    # Yes!
+    print("Speech synthesized for text [{}]".format(text))
+elif speech_synthesis_result.reason == speechsdk.ResultReason.Canceled:
+    # No - Ty to find out why not
+    cancellation_details = speech_synthesis_result.cancellation_details
+    print("Speech synthesis canceled: {}".format(cancellation_details.reason))
+    if cancellation_details.reason == speechsdk.CancellationReason.Error:
+        if cancellation_details.error_details:
+            print("Error details: {}".format(cancellation_details.error_details))
+```
+
+### Configure audio format and voices
+When synthesizing speech, you can use a **SpeechConfig** object to customize the audio that is returned by Azure Speech in Foundry Tools.
+
+#### Audio format
+
+Azure Speech supports multiple output formats for the audio stream that is generated by speech synthesis. Depending on your specific needs, you can choose a format based on the required:
+
+- Audio file type
+- Sample-rate
+- Bit-depth
+
+For example, the following Python code sets the speech output format for a previously defined **SpeechConfig** object named _speech_config_:
+
+```python
+speech_config.set_speech_synthesis_output_format(SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm)
+```
+
+For a full list of supported formats and their enumeration values, see the [Azure Speech SDK documentation](https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.speechsynthesisoutputformat).
+
+#### Voices
+
+The Azure Speech service provides multiple voices that you can use to personalize your speech-enabled applications. Voices are identified by names that indicate a locale, a person's name, and other details - for example `en-US-Brian:DragonHDLatestNeural`.
+
+The following Python example code sets the voice to be used
+
+```python
+speech_config.speech_synthesis_voice_name='en-US-Brian:DragonHDLatestNeural'
+```
+
+For information about voices, see the [Azure Speech SDK documentation](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=tts).
+
+### Use Speech Synthesis Markup Language
+While the Azure Speech SDK enables you to submit plain text to be synthesized into speech, the service also supports an XML-based syntax for describing characteristics of the speech you want to generate. This **Speech Synthesis Markup Language** (SSML) syntax offers greater control over how the spoken output sounds, enabling you to:
+
+- Specify a speaking style, such as "excited" or "cheerful" when using a neural voice.
+- Insert pauses or silence.
+- Specify _phonemes_ (phonetic pronunciations), for example to pronounce the text "SQL" as "sequel".
+- Adjust the _prosody_ of the voice (affecting the pitch, timbre, and speaking rate).
+- Use common "say-as" rules, for example to specify that a given string should be expressed as a date, time, telephone number, or other form.
+- Insert recorded speech or audio, for example to include a standard recorded message or simulate background noise.
+
+For example, consider the following SSML:
+
+```xml
+<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" 
+                     xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US"> 
+    <voice name="en-US-AriaNeural"> 
+        <mstts:express-as style="cheerful"> 
+          I say tomato 
+        </mstts:express-as> 
+    </voice> 
+    <voice name="en-US-GuyNeural"> 
+        I say <phoneme alphabet="sapi" ph="t ao m ae t ow"> tomato </phoneme>. 
+        <break strength="weak"/>Lets call the whole thing off! 
+    </voice> 
+</speak>
+```
+
+This SSML specifies a spoken dialog between two different neural voices, like this:
+
+- **Ariana** (_cheerfully_): "I say tomato:
+- **Guy**: "I say tomato (pronounced _tom-ah-toe_) ... Let's call the whole thing off!"
+
+To submit an SSML description to the Speech service, you can use an appropriate method of a **SpeechSynthesizer** object, like this:
+
+```python
+speech_synthesis_result = speech_synthesizer.speak_ssml_async('<speak>...').get()
+```
+
+For more information about SSML, see the [Azure Speech SDK documentation](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup).
+## Develop a speech agent with the Azure Speech MCP server
+### Introduction
+Azure Speech in Foundry Tools provides speech-to-text and text-to-speech capabilities that you can integrate into AI applications. These capabilities let you transcribe audio to text and synthesize natural-sounding speech from text.
+
+While you can call these capabilities directly through the Speech SDK or REST APIs, you can also make them available to an AI agent through the **Azure Speech Model Context Protocol (MCP) server**. This approach lets the agent handle speech tasks based on a user's natural language request, without you needing to write specific code for each speech operation.
+
+For example, suppose you work for a company that needs to process customer support calls. Your team needs to transcribe recorded calls to text for analysis, and generate audio responses that can be played back to customers. Rather than building separate integrations for transcription and synthesis, you can create an AI agent that uses the Azure Speech MCP server to perform both tasks through a single tool connection.
+### Understand the Azure Speech MCP server
+The Azure Speech MCP server connects AI agents to Azure Speech in Foundry Tools through the **Model Context Protocol (MCP)**. Before exploring the Speech MCP server itself, it helps to understand what MCP is and how it enables agents to use external tools.
+
+#### What is the Model Context Protocol?
+
+The Model Context Protocol (MCP) is an open protocol that defines how AI agents interact with external tools, data sources, and services. MCP uses a client-server architecture with the following components:
+
+- **Host**: The application that runs the agent (such as Microsoft Foundry or a custom app).
+- **Client**: A component within the host that manages connections to MCP servers and handles communication.
+- **Server**: A program that exposes tools, resources, and prompts that an agent can discover and call.
+
+When an agent connects to an MCP server, it receives a catalog of available tools along with descriptions of what each tool does. The agent can then choose the right tool based on the user's request. This approach is called _dynamic tool discovery_ — the agent doesn't need hardcoded knowledge of each tool. Instead, it queries the MCP server at runtime to find out what's available.
+
+The key advantage of MCP for AI agents is flexibility. Tools can be added, updated, or removed on the server without modifying the agent itself. The agent always has access to the latest tool definitions, which makes MCP-based solutions easier to maintain and scale.
+
+>**Tip**: To learn more about MCP architecture and how to build custom MCP tool integrations, see the **[Integrate MCP Tools with Azure AI Agents](https://learn.microsoft.com/en-us/training/modules/connect-agent-to-mcp-tools/)** module.
+
+#### Azure Speech MCP server capabilities
+
+The Azure Speech MCP server exposes two core speech capabilities as tools that any MCP-compatible agent can call:
+
+|Capability|Description|
+|---|---|
+|**Speech-to-text (Recognize)**|Converts audio files to text using advanced speech recognition. Supports WAV, MP3, OGG, FLAC, MP4, M4A, AAC, and other common audio formats. Includes options for language selection, phrase hints for improved accuracy, profanity filtering, and detailed or simple output formats.|
+|**Text-to-speech (Synthesize)**|Converts text input into natural-sounding audio files using neural text-to-speech voices. Supports multiple languages and voices (for example, `en-US-JennyNeural` or `en-GB-SoniaNeural`), and generates output in WAV, MP3, or other formats.|
+
+When you connect the Speech MCP server to an agent, the agent receives the available speech tools and their descriptions. Based on the user's prompt, the agent decides which tool to call. For example, if a user says "Transcribe this audio file," the agent calls the speech-to-text tool. If the user says "Generate speech from this text," the agent calls the text-to-speech tool.
+
+#### How the agent selects tools
+
+The tool selection process works as follows:
+
+1. The user sends a prompt to the agent.
+2. The agent analyzes the prompt and determines which speech task needs to be performed.
+3. The agent checks the available MCP tools and their descriptions to find the best match.
+4. The agent calls the selected tool through the MCP server, passing the relevant input (audio file URL or text).
+5. The MCP server processes the request using Azure Speech and returns the results (transcribed text or a link to an audio file).
+6. The agent presents the results to the user in a natural language response.
+
+The agent handles tool selection autonomously, so you don't need to write routing logic to determine whether a prompt requires speech-to-text or text-to-speech.
+
+#### Storage requirements
+
+Unlike text-only MCP tools, the Azure Speech MCP server works with audio files, which requires an **Azure Storage account**.
+
+- **Text-to-speech**: The Speech MCP server saves generated audio files to an Azure Blob Storage container. The agent's response includes a link to the generated audio file.
+- **Speech-to-text**: The agent can transcribe audio files from a publicly accessible URL or from an Azure Blob Storage container accessed with a SAS URL.
+
+When you connect the Speech MCP server to your agent, you provide a **SAS URL** for a blob container. The SAS URL grants the MCP server permission to read and write files in that container.
+
+>**Important**: Treat SAS URLs as secrets. Use the shortest practical expiry time, scope them to a single container, and don't embed them in source code, agent prompts, or chat transcripts.
+
+#### Prerequisites
+
+To use the Azure Speech MCP server with an agent, you need:
+
+- An **Azure subscription**.
+- A **Foundry resource and project** — you need Contributor or Owner role on the resource group. Your Foundry resource includes speech capabilities.
+- An **Azure Storage account** with a blob container for storing audio files.
+- A **SAS URL** for the blob container with read, write, add, create, and list permissions.
+
+#### Security considerations
+
+The Azure Speech MCP server uses key-based authentication. When you create the connection, you provide your resource key and a blob container SAS URL. Follow these best practices:
+
+- Store keys and SAS URLs in a secure secret store and rotate them regularly.
+- Avoid embedding keys or SAS URLs directly in source code, scripts, or documentation.
+- Use the shortest practical SAS expiry time and scope it to the minimum required resource.
+- Rotate keys immediately if you suspect they're exposed.
+
+### Connect and use the Speech MCP server with an agent
+After you understand the capabilities of the Azure Speech MCP server, the next step is to connect it to an agent and start using it. This involves setting up storage, creating an agent in Microsoft Foundry, connecting the Speech MCP tool, testing it in the agent playground, and optionally building a client application.
+
+#### Set up Azure Blob Storage
+
+The Azure Speech MCP server requires an Azure Storage account to store audio files. You need to create a storage account and a blob container before connecting the tool.
+
+1. In the [Azure portal](https://portal.azure.com/), create a new **Azure Storage account** (or use an existing one).
+2. In the storage account, expand **Data storage** and select **Containers**.
+3. Create a new container (for example, named **files**) to store the audio files your agent generates and reads.
+4. Generate a **SAS token** for the container with the following permissions: Read, Add, Create, Write, and List. Set the expiry time to the shortest practical duration.
+
+>**Important**: Copy the generated SAS URL and store it securely — you need it when connecting the Speech MCP server.
+
+#### Create a Foundry project and agent
+
+To use the Azure Speech MCP server, you need a Microsoft Foundry project with a deployed model.
+
+1. In the [Microsoft Foundry portal](https://ai.azure.com/), create a new project (or use an existing one).
+    
+2. Deploy a model (such as **gpt-4.1**) that your agent will use for reasoning and generating responses.
+    
+3. Create an agent and give it instructions that describe its purpose. For example:
+    
+    ```
+    You are an AI agent that uses the Azure AI Speech tool to transcribe and generate speech.
+    ```
+    
+
+The agent is now ready to receive tool connections.
+
+#### Connect the Azure Speech MCP server
+
+You connect the Azure Speech MCP server to your agent through the **Tools** page in the Foundry portal.
+
+1. In the navigation pane, select the **Tools** page.
+    
+2. Select **Connect a tool** and choose **Azure Speech in Foundry Tools** from the catalog.
+    
+3. Configure the connection with the following settings:
+    
+    - **Foundry resource name**: The name of your Foundry resource (for example, `myproject-resource`).
+    - **Bearer** (`Ocp-Apim-Subscription-Key`): The key for your Foundry project.
+    - **X-Blob-Container-Url**: The SAS URL for your blob container.
+4. Wait for the connection to be created, then select **Use in an agent** and choose your agent.
+    
+
+![Screenshot of the Tools catalog in the Foundry portal showing the Azure Speech in Foundry Tools connection configuration.](https://learn.microsoft.com/en-gb/training/wwl-data-ai/develop-speech-agent-speech-mcp/media/azure-speech-tool-config.png)
+
+The agent now has access to the speech-to-text and text-to-speech tools exposed by the Azure Speech MCP server.
+
+>**Tip**: You can find the project key on the project home page in the Foundry portal.
+
+#### Test in the agent playground
+
+The agent playground in the Foundry portal provides an interactive environment for testing your agent.
+
+##### Test text-to-speech
+
+Enter a prompt that asks the agent to generate speech:
+
+```
+Generate "To be or not to be, that is the question." as speech
+```
+
+The first time the agent uses the Speech MCP tool, you're prompted to **approve** the tool usage. You can select **Always approve all Azure Speech MCP Server tools** to skip future approval prompts.
+
+The response includes a link to the generated audio file saved in your blob container. Select the link to listen to the synthesized speech.
+
+##### Test speech-to-text
+
+Enter a prompt that asks the agent to transcribe an audio file. You can use a publicly accessible URL or a SAS URL pointing to a file in your blob container:
+
+```
+Transcribe the file at https://example.com/audio/meeting-recording.wav
+```
+
+The agent calls the speech-to-text tool and returns the transcribed text.
+
+##### Customizing speech output
+
+The Speech MCP tools support several options you can specify in your prompts:
+
+- **Voice selection**: Specify a neural voice, such as `en-GB-SoniaNeural` or `en-US-JennyNeural`.
+- **Language**: Specify the language for recognition or synthesis (for example, `es-ES` for Spanish).
+- **Phrase hints**: Provide domain-specific terms to improve transcription accuracy (for example, "Azure, OpenAI, Cognitive Services").
+- **Profanity filtering**: Request `masked`, `removed`, or `raw` profanity handling during transcription.
+
+For example:
+
+```
+Synthesize "Better a witty fool, than a foolish wit!" as speech using the voice "en-GB-SoniaNeural".
+```
+
+#### Build a client application
+
+While the agent playground is useful for testing, you typically want to build a client application that uses the agent programmatically. The Microsoft Foundry SDK supports this through the OpenAI Responses API.
+
+To build a client application, you use the `azure-ai-projects` and `azure-identity` packages. The general pattern is:
+
+1. Create an `AIProjectClient` using your Foundry project endpoint and `DefaultAzureCredential` (which uses your Azure CLI credentials in development).
+2. Get an OpenAI client from the project client by calling `get_openai_client()`.
+3. Call `responses.create()` to send a user prompt to the agent.
+
+The key part is how you reference the agent — you specify it by name in the `extra_body` parameter:
+
+```python
+response = openai_client.responses.create(
+    input=[{"role": "user", "content": user_prompt}],
+    extra_body={
+        "agent_reference": {
+            "name": "Speech-Agent",
+            "type": "agent_reference"
+        }
+    },
+)
+
+print(response.output_text)
+```
+
+The agent processes the prompt, calls the appropriate Speech MCP tool, and returns the result in `output_text`. For text-to-speech requests, the output includes a link to the generated audio file in your blob container.
+
+##### Connect the MCP server in code
+
+Instead of connecting the Azure Speech MCP server through the Foundry portal, you can define the MCP tool connection directly in code when you create an agent. Use the `MCPTool` class from the `azure-ai-projects` SDK:
+
+```python
+from azure.ai.projects.models import MCPTool
+
+mcp_tool = MCPTool(
+    server_label="azure-speech",
+    server_url="https://{foundry-resource-name}.cognitiveservices.azure.com/speech/mcp",
+    require_approval="always",
+)
+```
+
+You then pass the `mcp_tool` when creating the agent through the SDK. This approach is useful when you want to manage tool connections as part of your application code rather than configuring them manually in the portal.
+## Develop an Azure Speech Voice Live Agent in Microsoft Foundry
+### Introduction
+Voice-enabled applications are transforming how we interact with technology, and this module guides you through building a real-time, interactive voice solutions using advanced APIs and tools. The Voice live API in Azure Speech in Foundry Tools is a solution enabling low-latency, high-quality speech to speech interactions for voice agents. The API is designed for developers seeking scalable and efficient voice-driven experiences as it eliminates the need to manually orchestrate multiple components.
+### Explore the Azure Voice Live API
+The Voice live API enables developers to create voice-enabled applications with real-time, bidirectional communication. This unit explores its architecture, configuration, and implementation.
+
+#### Key features of the Voice Live API
+
+The Voice live API provides real-time communication using WebSocket connections. It supports advanced features such as speech recognition, text-to-speech synthesis, avatar streaming, and audio processing.
+
+- JSON-formatted events manage conversations, audio streams, and responses.
+- Events are categorized into client events (sent from client to server) and server events (sent from server to client).
+
+Key features include:
+
+- Real-time audio processing with support for multiple formats like PCM16 and G.711.
+- Advanced voice options, including OpenAI voices and Azure custom voices.
+- Avatar integration using WebRTC for video and animation.
+- Built-in noise reduction and echo cancellation.
+
+>**Note**: Voice Live API is optimized for Microsoft Foundry resources. We recommend using Microsoft Foundry resources for full feature availability and best Microsoft Foundry integration experience.
+
+For a table of supported models and regions, visit the [Voice Live API overview](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live#supported-models-and-regions).
+
+#### Connect to the Voice Live API
+
+The Voice live API supports two authentication methods: Microsoft Entra (keyless) and API key. Microsoft Entra uses token-based authentication for a Microsoft Foundry resource. You apply a retrieved authentication token using a `Bearer` token with the `Authorization` header.
+
+For the recommended keyless authentication with Microsoft Entra ID, you need to assign the **Cognitive Services User** role to your user account or a managed identity. You generate a token using the Azure CLI or Azure SDKs. The token must be generated with the `https://ai.azure.com/.default` scope, or the legacy `https://cognitiveservices.azure.com/.default` scope. Use the token in the `Authorization` header of the WebSocket connection request, with the format `Bearer <token>`.
+
+For key access, an API key can be provided in one of two ways. You can use an `api-key` connection header on the prehandshake connection. This option isn't available in a browser environment. Or, you can use an `api-key` query string parameter on the request URI. Query string parameters are encrypted when using https/wss.
+
+>**Note**: The `api-key` connection header on the prehandshake connection isn't available in a browser environment.
+
+##### WebSocket endpoint
+
+The endpoint to use varies depending on how you want to access your resources. You can access resources through a connection to the Foundry project when implementing an agent, or through a direct connection to a model.
+
+- **Project connection:** The endpoint is `wss://<your-ai-foundry-resource-name>.services.ai.azure.com/voice-live/realtime?api-version=2025-10-01`
+- **Model connection:** The endpoint is `wss://<your-ai-foundry-resource-name>.cognitiveservices.azure.com/voice-live/realtime?api-version=2025-10-01`.
+
+The endpoint is the same for all models. The only difference is the required `model` query parameter, or, when using the Agent service, the `agent_id` and `project_id` parameters.
+
+#### Voice Live API events
+
+Client and server events facilitate communication and control within the Voice live API. Key client events include:
+
+- `session.update`: Modify session configurations.
+- `input_audio_buffer.append`: Add audio data to the buffer.
+- `response.create`: Generate responses via model inference.
+
+Server events provide feedback and status updates:
+
+- `session.updated`: Confirm session configuration changes.
+- `response.done`: Indicate response generation completion.
+- `conversation.item.created`: Notify when a new conversation item is added.
+
+For a full list of client/server events, visit [Voice live API Reference](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-api-reference).
+
+>**Note**: Proper handling of events ensures seamless interaction between client and server.
+
+##### Configure session settings for the Voice live API
+
+Often, the first event sent by the caller on a newly established Voice live API session is the `session.update` event. This event controls a wide set of input and output behavior. Session settings can be updated dynamically using the `session.update` event. Developers can configure voice types, modalities, turn detection, and audio formats.
+
+Example configuration:
+
+```json
+{
+  "type": "session.update",
+  "session": {
+    "modalities": ["text", "audio"],
+    "voice": {
+      "type": "openai",
+      "name": "alloy"
+    },
+    "instructions": "You are a helpful assistant. Be concise and friendly.",
+    "input_audio_format": "pcm16",
+    "output_audio_format": "pcm16",
+    "input_audio_sampling_rate": 24000,
+    "turn_detection": {
+      "type": "azure_semantic_vad",
+      "threshold": 0.5,
+      "prefix_padding_ms": 300,
+      "silence_duration_ms": 500
+    },
+    "temperature": 0.8,
+    "max_response_output_tokens": "inf"
+  }
+}
+```
+
+>**Tip**: Use Azure semantic VAD for intelligent turn detection and improved conversational flow.
+
+##### Implement real-time audio processing with the Voice live API
+
+Real-time audio processing is a core feature of the Voice live API. Developers can append, commit, and clear audio buffers using specific client events.
+
+- **Append audio:** Add audio bytes to the input buffer.
+- **Commit audio:** Process the audio buffer for transcription or response generation.
+- **Clear audio:** Remove audio data from the buffer.
+
+Noise reduction and echo cancellation can be configured to enhance audio quality. For example:
+
+```json
+{
+  "type": "session.update",
+  "session": {
+    "input_audio_noise_reduction": {
+      "type": "azure_deep_noise_suppression"
+    },
+    "input_audio_echo_cancellation": {
+      "type": "server_echo_cancellation"
+    }
+  }
+}
+```
+
+>**Note**: Noise reduction improves VAD accuracy and model performance by filtering input audio.
+
+##### Integrate avatar streaming using the Voice live API
+
+The Voice live API supports WebRTC-based avatar streaming for interactive applications. Developers can configure video, animation, and blendshape settings.
+
+- Use the `session.avatar.connect` event to provide the client's SDP offer.
+- Configure video resolution, bitrate, and codec settings.
+- Define animation outputs such as blendshapes and visemes.
+
+Example configuration:
+
+```json
+{
+  "type": "session.avatar.connect",
+  "client_sdp": "<client_sdp>"
+}
+```
+
+>**Tip**: Use high-resolution video settings for enhanced visual quality in avatar interactions.
+
+### Explore the AI Voice Live client library for Python
+The Azure AI Voice Live client library for Python provides a real-time, speech-to-speech client for Azure AI Voice Live API. It opens a WebSocket session to stream microphone audio to the service and receives server events for responsive conversations.
+ 
+>**Important**: As of version 1.0.0, this SDK is async-only. The synchronous API is deprecated to focus exclusively on async patterns. All examples and samples use async/await syntax.
+
+#### Implement authentication
+
+You can implement authentication with an API key or a Microsoft Entra ID token. The following code sample shows an API key implementation. It assumes environment variables are set in a `.env` file, or directly in your environment.
+
+```python
+import asyncio
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.voicelive import connect
+
+async def main():
+    async with connect(
+        endpoint="your-endpoint",
+        credential=AzureKeyCredential("your-api-key"),
+        model="gpt-4o"
+    ) as connection:
+        # Your async code here
+        pass
+
+asyncio.run(main())
+```
+
+For production applications, Microsoft Entra authentication is recommended. The following code sample shows implementing the `DefaultAzureCredential` for authentication:
+
+```python
+import asyncio
+from azure.identity.aio import DefaultAzureCredential
+from azure.ai.voicelive import connect
+
+async def main():
+    credential = DefaultAzureCredential()
+
+    async with connect(
+        endpoint="your-endpoint",
+        credential=credential,
+        model="gpt-4o"
+    ) as connection:
+        # Your async code here
+        pass
+
+asyncio.run(main())
+```
+
+#### Handling events
+
+Proper handling of events ensures a more seamless interaction between the client and agent. For example, when handling a user interrupting the voice agent you need to cancel agent audio playback immediately in the client. If you don't, the client continues to play the last agent response until the interrupt is processed in the API - resulting in the agent "talking over" the user.
+
+The following code sample shows some basic event handling:
+
+```python
+async for event in connection:
+    if event.type == ServerEventType.SESSION_UPDATED:
+        print(f"Session ready: {event.session.id}")
+        # Start audio capture
+
+    elif event.type == ServerEventType.INPUT_AUDIO_BUFFER_SPEECH_STARTED:
+        print("User started speaking")
+        # Stop playback and cancel any current response
+
+    elif event.type == ServerEventType.RESPONSE_AUDIO_DELTA:
+        # Play the audio chunk
+        audio_bytes = event.delta
+
+    elif event.type == ServerEventType.ERROR:
+        print(f"Error: {event.error.message}")
+```
+
+#### Minimal example
+
+The following code sample shows authenticating to the API and configuring the session.
+
+```python
+import asyncio
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.voicelive.aio import connect
+from azure.ai.voicelive.models import (
+    RequestSession, Modality, InputAudioFormat, OutputAudioFormat, ServerVad, ServerEventType
+)
+
+API_KEY = "your-api-key"
+ENDPOINT = "your-endpoint"
+MODEL = "gpt-4o"
+
+async def main():
+    async with connect(
+        endpoint=ENDPOINT,
+        credential=AzureKeyCredential(API_KEY),
+        model=MODEL,
+    ) as conn:
+        session = RequestSession(
+            modalities=[Modality.TEXT, Modality.AUDIO],
+            instructions="You are a helpful assistant.",
+            input_audio_format=InputAudioFormat.PCM16,
+            output_audio_format=OutputAudioFormat.PCM16,
+            turn_detection=ServerVad(
+                threshold=0.5, 
+                prefix_padding_ms=300, 
+                silence_duration_ms=500
+            ),
+        )
+        await conn.session.update(session=session)
+
+        # Process events
+        async for evt in conn:
+            print(f"Event: {evt.type}")
+            if evt.type == ServerEventType.RESPONSE_DONE:
+                break
+
+asyncio.run(main())
+```
+
+### Create a Voice Live agent
+You can create and run an application to use Voice Live with a Microsoft Foundry agent. Using agents with Voice Live brings the following advantages over connecting directly to a model:
+
+- Agents encapsulate instructions and configuration within the agent itself, rather than specifying instructions in the session code.
+- Agents support complex logic and behaviors, making it easier to manage and update conversational flows without changing the client code.
+- The agent approach streamlines integration. The agent ID is used to connect and all necessary settings are handled internally, reducing the need for manual configuration in the code.
+- Separating agent logic from voice implementation supports better maintainability and scalability for scenarios where multiple conversational experiences or business logic variations are needed.
+
+#### Create a voice agent in the agent playground
+
+As you develop an agent in the Microsoft Foundry portal, you can enable **voice mode** to easily integrate Voice Live into your agent, and test it in the playground.
+
+![Screenshot of the agent playground with voice mode enabled.](https://learn.microsoft.com/en-gb/training/wwl-data-ai/develop-voice-live-agent/media/voice-mode.png)
+
+After enabling voice mode, you can use the **Configuration** pane to enable Voice Live settings, including:
+
+- **Language**: The language spoken and understood by the agent.
+- **Advanced settings**:
+    - Voice activity detection (VAD) settings to detect interruptions and end of speech.
+    - Audio enhancement to mitigate background noise and audio quality.
+- **Voice**: The specific voice used by the agent, and advanced voice settings to control the tone and speaking rate.
+- **Interim response**: The agent can automatically generate speech while waiting for a model's response.
+- **Avatar**: Inclusion of a visual avatar to represent the agent.
+
+#### Create a voice agent using code
+
+If you prefer to create your agent using code, you can use the appropriate Foundry Agent SDK (for example the Foundry SDK for Python) to create the agent, and add Voice Live metadata to its definition.
+
+```python
+import os
+import json
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+from azure.ai.projects.models import PromptAgentDefinition
+
+load_dotenv()
+
+# Setup client
+project_client = AIProjectClient(
+    "PROJECT_ENDPOINT",
+    credential=DefaultAzureCredential(),
+)
+
+# Define Voice Live session settings
+voice_live_config = {
+    "session": {
+        "voice": {
+            "name": "en-US-Ava:DragonHDLatestNeural",
+            "type": "azure-standard",
+            "temperature": 0.8
+        },
+        "input_audio_transcription": {
+            "model": "azure-speech"
+        },
+        "turn_detection": {
+            "type": "azure_semantic_vad",
+            "end_of_utterance_detection": {
+                "model": "semantic_detection_v1_multilingual"
+            }
+        },
+        "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
+        "input_audio_echo_cancellation": {"type": "server_echo_cancellation"}
+    }
+}
+
+# Create agent with Voice Live configuration in metadata
+agent = project_client.agents.create_version(
+    agent_name="AGENT_NAME",
+    definition=PromptAgentDefinition(
+        model="MODEL_DEPLOYMENT_NAME",
+        instructions="You are a helpful assistant.",
+    ),
+    metadata=chunk_config(json.dumps(voice_live_config))
+)
+print(f"Agent created: {agent.name} (version {agent.version})")
+
+
+# Helper function for Voice Live configuration chunking (to handle 512-char metadata limit)
+def chunk_config(config_json: str, limit: int = 512) -> dict:
+    """Split config into chunked metadata entries."""
+    metadata = {"microsoft.voice-live.configuration": config_json[:limit]}
+    remaining = config_json[limit:]
+    chunk_num = 1
+    while remaining:
+        metadata[f"microsoft.voice-live.configuration.{chunk_num}"] = remaining[:limit]
+        remaining = remaining[limit:]
+        chunk_num += 1
+    return metadata
+
+```
+
+#### Use your agent in a client application
+
+To use your agent, you need to build a client application that:
+
+1. Connects to the agent
+2. Configures audio hardware input and output
+3. Establishes a Voice live session
+4. Monitors audio systems for activity
+5. Processes events (such as user speech input and responses from the agent)
+
+While you can implement these tasks using any of the functionality available in the APIs, the recommended pattern for Voice Live client applications is to:
+
+- Use Microsoft Entra ID authentication to connect to the agent in a Microsoft Foundry project.
+- Implement a custom **VoiceAssistant** class that encapsulates strongly typed agent configuration, defines functions to configure and start the Voice live session, and processes voice events.
+- Implement a custom **AudioProcessor** class that encapsulates input and output through audio devices.
+
+The following example shows a minimal implementation of this pattern in Python (using the _PyAudio_ library for audio input and output).
+
+```python
+import os
+import asyncio
+import base64
+import queue
+from dotenv import load_dotenv
+import pyaudio
+from azure.identity.aio import AzureCliCredential
+from azure.ai.voicelive.aio import connect
+from azure.ai.voicelive.models import (
+    InputAudioFormat,
+    Modality,
+    OutputAudioFormat,
+    RequestSession,
+    ServerEventType,
+    AudioNoiseReduction,
+    AudioEchoCancellation,
+    AzureSemanticVadMultilingual
+) 
+
+
+# Main program entry point
+def main():
+    """Main entry point."""
+
+    try:
+        # Get required configuration from environment variables
+        load_dotenv()
+        endpoint = os.environ.get("AZURE_VOICELIVE_ENDPOINT")
+        agent_name = os.environ.get("AZURE_VOICELIVE_AGENT_ID")
+        project_name = os.environ.get("AZURE_VOICELIVE_PROJECT_NAME")
+
+        # Create credential for authentication
+        credential = AzureCliCredential()
+
+        # Create and start the voice assistant
+        assistant = VoiceAssistant(
+            endpoint=endpoint,
+            credential=credential,
+            agent_name=agent_name,
+            project_name=project_name
+        )
+
+        # Run the assistant
+        try:
+            asyncio.run(assistant.start())
+        except KeyboardInterrupt:
+            # Exit if the user enters CTRL+C
+            print("\nGoodbye!")
+
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
+# VoiceAssistant class
+class VoiceAssistant:
+    """Main voice assistant - coordinates the conversation"""
+
+    def __init__(self, endpoint, credential, agent_name, project_name):
+        self.endpoint = endpoint
+        self.credential = credential
+
+        # Agent configuration
+        self.agent_config = {
+            "agent_name": agent_name,
+            "project_name": project_name
+        }
+
+    async def start(self):
+        """Start the voice assistant."""
+
+        try:
+            # Connect the agent
+            async with connect(
+                endpoint=self.endpoint,
+                credential=self.credential,
+                api_version="2026-01-01-preview",
+                agent_config=self.agent_config
+            ) as connection:
+                self.connection = connection
+
+                # Initialize audio processor
+                self.audio_processor = AudioProcessor(connection)
+
+                # Configure the session
+                await self.setup_session()
+
+                # Start audio I/O 
+                self.audio_processor.start_playback()
+                print("\nVoice session started...")
+                print("Press Ctrl+C to exit\n")
+
+                # Process events
+                await self.process_events()
+
+
+        finally:
+            if hasattr(self, 'audio_processor'):
+                self.audio_processor.shutdown()
+
+    async def setup_session(self):
+        """Configure the session with audio settings."""
+
+        session_config = RequestSession(
+            # Enable both text and audio
+            modalities=[Modality.TEXT, Modality.AUDIO],
+
+            # Audio format (16-bit PCM at 24kHz)
+            input_audio_format=InputAudioFormat.PCM16,
+            output_audio_format=OutputAudioFormat.PCM16,
+
+            # Voice activity detection (when to detect speech)
+            turn_detection=AzureSemanticVadMultilingual(),
+
+            # Prevent echo from speaker feedback
+            input_audio_echo_cancellation=AudioEchoCancellation(),
+
+            # Reduce background noise
+            input_audio_noise_reduction=AudioNoiseReduction(type="azure_deep_noise_suppression")
+        )
+
+        await self.connection.session.update(session=session_config)
+        print("Session configured")
+
+    async def process_events(self):
+        """Process events from the VoiceLive service."""
+
+        # Listen for events from the service
+        async for event in self.connection:
+            await self.handle_event(event)
+
+    async def handle_event(self, event):
+        """Handle different event types from the service."""
+
+        # Session is ready - start capturing audio
+        if event.type == ServerEventType.SESSION_UPDATED:
+            print(f"Connected to agent: {event.session.agent.name}")
+            self.audio_processor.start_capture()
+
+        # User speech was transcribed
+        elif event.type == ServerEventType.CONVERSATION_ITEM_INPUT_AUDIO_TRANSCRIPTION_COMPLETED:
+            print(f'You: {event.get("transcript", "")}')
+
+        # Agent is responding with audio transcript
+        elif event.type == ServerEventType.RESPONSE_AUDIO_TRANSCRIPT_DONE:
+            print(f'Agent: {event.get("transcript", "")}')
+
+        # User started speaking (interrupt any playing audio)
+        elif event.type == ServerEventType.INPUT_AUDIO_BUFFER_SPEECH_STARTED:
+            self.audio_processor.clear_playback_queue()
+            print("Listening...")
+
+        # User stopped speaking
+        elif event.type == ServerEventType.INPUT_AUDIO_BUFFER_SPEECH_STOPPED:
+            print("Thinking...")
+
+        # Receiving audio response chunks
+        elif event.type == ServerEventType.RESPONSE_AUDIO_DELTA:
+            self.audio_processor.queue_audio(event.delta)
+
+        # Audio response complete
+        elif event.type == ServerEventType.RESPONSE_AUDIO_DONE:
+            print("Response complete\n")
+
+        # Handle errors
+        elif event.type == ServerEventType.ERROR:
+            print(f"Error: {event.error.message}")
+
+
+# AudioProcessor class
+class AudioProcessor:
+    """Handles audio input (microphone) and output (speakers) """
+
+    def __init__(self, connection):
+        self.connection = connection
+        self.audio = pyaudio.PyAudio()
+
+        # Audio settings: 24kHz, 16-bit PCM, mono
+        self.format = pyaudio.paInt16
+        self.channels = 1
+        self.rate = 24000
+        self.chunk_size = 1200  # 50ms chunks
+
+        # Streams for input and output
+        self.input_stream = None
+        self.output_stream = None
+        self.playback_queue = queue.Queue()
+
+    def start_capture(self):
+        """Start capturing audio from the microphone."""
+
+        def capture_callback(in_data, frame_count, time_info, status):
+            # Convert audio to base64 and send to VoiceLive
+            audio_base64 = base64.b64encode(in_data).decode("utf-8")
+            asyncio.run_coroutine_threadsafe(
+                self.connection.input_audio_buffer.append(audio=audio_base64),
+                self.loop
+            )
+            return (None, pyaudio.paContinue)
+
+        # Store event loop for use in callback thread
+        self.loop = asyncio.get_event_loop()
+
+        self.input_stream = self.audio.open(
+            format=self.format,
+            channels=self.channels,
+            rate=self.rate,
+            input=True,
+            frames_per_buffer=self.chunk_size,
+            stream_callback=capture_callback
+        )
+        print("Microphone started")
+
+    def start_playback(self):
+        """Start audio playback system."""
+
+        remaining = bytes()
+
+        def playback_callback(in_data, frame_count, time_info, status):
+            nonlocal remaining
+
+            # Calculate bytes needed
+            bytes_needed = frame_count * pyaudio.get_sample_size(pyaudio.paInt16)
+            output = remaining[:bytes_needed]
+            remaining = remaining[bytes_needed:]
+
+            # Get more audio from queue if needed
+            while len(output) < bytes_needed:
+                try:
+                    audio_data = self.playback_queue.get_nowait()
+                    if audio_data is None:  # End signal
+                        break
+                    output += audio_data
+                except queue.Empty:
+                    # Pad with silence if no audio available
+                    output += bytes(bytes_needed - len(output))
+                    break
+
+            # Keep any extra for next callback
+            if len(output) > bytes_needed:
+                remaining = output[bytes_needed:]
+                output = output[:bytes_needed]
+
+            return (output, pyaudio.paContinue)
+
+        self.output_stream = self.audio.open(
+            format=self.format,
+            channels=self.channels,
+            rate=self.rate,
+            output=True,
+            frames_per_buffer=self.chunk_size,
+            stream_callback=playback_callback
+        )
+        print("Speakers ready")
+
+    def queue_audio(self, audio_data):
+        """Add audio data to the playback queue."""
+        self.playback_queue.put(audio_data)
+
+    def clear_playback_queue(self):
+        """Clear any pending audio (used when user interrupts)."""
+        while not self.playback_queue.empty():
+            try:
+                self.playback_queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def shutdown(self):
+        """Clean up audio resources."""
+        if self.input_stream:
+            self.input_stream.stop_stream()
+            self.input_stream.close()
+
+        if self.output_stream:
+            self.playback_queue.put(None)  # Signal end
+            self.output_stream.stop_stream()
+            self.output_stream.close()
+
+        self.audio.terminate()
+        print("Audio stopped")
+
+
+if __name__ == "__main__":
+    main()
+```
+## Translate text and speech with Microsoft Foundry Tools
+### Introduction
+There are many commonly used languages throughout the world, and the ability to exchange information between speakers of different languages is often a critical requirement for global solutions.
+
+Translation between languages is a specialized skill, and can often be time-consuming and expensive. Automated translation (sometimes referred to as "machine translation") is often used to reduce the time and costs involved; but it requires complex software that understands the linguistic rules and idioms of both source and target languages.
+
+AI models are commonly at the heart of automated translation solutions; whether they be used to translate text-based documents or spoken language.
+### Translation in Microsoft Foundry
+Many large language models (LLMs) can generate output in multiple languages, and can translate phrases or even documents. However, comprehensive multi-language translation solutions generally require specialized models; and Microsoft Foundry provides support for translation through Foundry Tools. Specifically:
+
+- **Azure Translator in Foundry Tools**: A comprehensive translation service for text, with a wide range of supported languages and the ability to create custom translation models.
+- **Azure Speech in Foundry Tools**: A suite of speech-related tools, including speech-to-text and speech-to-speech translation in multiple languages simultaneously.
+
+![Diagram of Foundry Tools for translation.](https://learn.microsoft.com/en-gb/training/wwl-data-ai/translate-text-speech/media/translation.png)
+
+Both Azure Translator and Azure Speech are accessible through a Microsoft Foundry resource endpoint, and provide extensive APIs and language-specific SDKs that you can use to develop comprehensive translation solutions.
+### Translate text
+Azure Translator in Foundry Tools provides an API for translating text between over 90 supported languages. With Azure Translator you can:
+
+- Translate or transliterate text using the default translation model or a large language model (LLM).
+- Translate documents, synchronously or asynchronously, while maintaining document structure.
+- Use custom translation models to translate domain-specific terms.
+
+#### Use Azure Translator in the Microsoft Foundry portal
+
+You can explore Azure Translator in the Microsoft Foundry portal, where there are playgrounds for text translation and document translation.
+
+![Screenshot of the text translator playground in the Foundry portal.](https://learn.microsoft.com/en-gb/training/wwl-data-ai/translate-text-speech/media/translator-playground.png)
+
+The Foundry portal is a great way to experiment with Azure translator, comparing results from the default model with those from LLMs, and viewing sample code to use the translator from your own client applications.
+#### Use Azure Translator in application code
+
+You can use the [REST API](https://learn.microsoft.com/en-us/azure/ai-services/translator/text-translation/reference/rest-api-guide) to call Azure Translator functions, or you can write code in your preferred language by using one of the supported SDKs; which include:
+
+- [Azure Translator Text Translation Client for Python](https://pypi.org/project/azure-ai-translation-text/1.0.1/)
+- [Azure Translator Text Translation Client for Microsoft .NET](https://www.nuget.org/packages/Azure.AI.Translation.Text/1.0.0)
+- [Azure Translator Text Translation Client for Java](https://mvnrepository.com/artifact/com.azure/azure-ai-translation-text/1.0.0)
+- [Azure Translator Text Translation Client for JavaScript](https://www.npmjs.com/package/@azure-rest/ai-translation-text/v/1.0.0)
+##### Connect to an Azure Translator resource
+
+Azure Translator APIs are served through REST _endpoints_, to which your client must make an authenticated connection. The endpoint can be:
+
+- The Azure Translator _global_ endpoint: `api.cognitive.microsofttranslator.com`
+- Azure Translator _regional_ endpoints: These endpoints include `api-nam.cognitive.microsofttranslator.com`, `api-apc.cognitive.microsofttranslator.com`, and `api-eur.cognitive.microsofttranslator.com`
+- Foundry resource endpoints: `{foundry-resource-name}.cognitiveservices.azure.com/`
+
+You can connect a client to a specific endpoint, or you can connect by specifying the region in which your resource is provisioned. For example, you could use either of the techniques shown in the following code sample to connect to Azure Translator using your Foundry API key for authentication:
+
+```python
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.translation.text import *
+
+key_credential = AzureKeyCredential("FOUNDRY_KEY")
+
+# Connect to a Foundry resource endpoint
+client = TextTranslationClient(credential=key_credential, endpoint="FOUNDRY_ENDPOINT")
+
+# Or connect using a region
+client = TextTranslationClient(credential=key_credential, region="FOUNDRY_REGION")
+```
+
+>**Tip**: For more information about the **TextTranslationClient** constructor, see the [Azure Translator Python SDK documentation](https://learn.microsoft.com/en-us/python/api/azure-ai-translation-text/azure.ai.translation.text.texttranslationclient#constructor).
+
+##### Determine available languages
+
+Azure Translator supports over 90 languages. In some cases, you may want to provide users with a list of available languages for translation; as shown in the following example code:
+
+```python
+languages = client.get_supported_languages(scope="translation")
+print("{} languages supported:".format(len(languages.translation)))
+for language in languages.translation.keys():
+    print(languages.translation[language].name + " (" + language + ")")
+```
+
+The results include the _name_ and _ISO code_ for each language:
+
+```
+137 languages supported:
+Afrikaans (af)
+Amharic (am)
+Arabic (ar)
+Assamese (as)
+Azerbaijani (az)
+Bashkir (ba)
+Belarusian (be)
+Bulgarian (bg)
+...
+```
+
+>**Tip**: For more information about the **get_supported_language** method, see the [Azure Translator Python SDK documentation](https://learn.microsoft.com/en-us/python/api/azure-ai-translation-text/azure.ai.translation.text.texttranslationclient#azure-ai-translation-text-texttranslationclient-get-supported-languages).
+
+##### Translate text
+
+To translate text from a _source_ language to one or more _target_ languages, use the **translate** method.
+
+- Source text is passed into the method as a list of **InputTextItem** objects, each containing a text string to be translated.
+- You can optionally specify a **from_language** parameter with the ISO code for the source language (for example, "en"); or you can omit this parameter to have Azure Translator automatically detect the source language.
+- Target languages as specified as a list of language codes in the **to_language** parameter - Azure Translator will return a translation for each valid language code.
+
+The following example translates two text inputs in different unspecified languages into French (_fr_) and English (_en_):
+
+```python
+input_text_elements = [InputTextItem(text="Hola"), InputTextItem(text="こんにちは")]
+translation_results = client.translate(body=input_text_elements, to_language=["fr", "en"])
+idx = 0
+for translation in translation_results:
+    input_text = input_text_elements[idx].text
+    idx += 1
+    sourceLanguage = translation.detected_language
+    for translated_text in translation.translations:
+        print(f"'{input_text}' was translated from {sourceLanguage.language} to {translated_text.to} as '{translated_text.text}'.")
+```
+
+The output from this code shows the detected source languages as Spanish (_es_) and Japanese (_ja_):
+
+```
+'Hola' was translated from es to fr as 'Bonjour'.
+'Hola' was translated from es to en as 'Hello'.
+'こんにちは' was translated from ja to fr as 'Bonjour'.
+'こんにちは' was translated from ja to en as 'Hello'.
+```
+
+>**Tip**: For more information about the **translate** method, see the [Azure Translator Python SDK documentation](https://learn.microsoft.com/en-us/python/api/azure-ai-translation-text/azure.ai.translation.text.texttranslationclient#azure-ai-translation-text-texttranslationclient-translate).
+
+##### Transliterate text
+
+The Japanese text in the previous example is written using Hiragana script, so rather than translate it to a different language, you may want to transliterate it to a different script - for example to render the Japanese words in Latin script (as used by English language text).
+
+To accomplish this, we can submit the Japanese text to the **transliterate** method with a **from_script** parameter of **Jpan** and a **to_script** parameter of **Latn**, like this:
+
+```python
+source_text = "こんにちは"
+input_text_elements = [InputTextItem(text=source_text)]
+transliteration_results = client.transliterate(body=input_text_elements, language="ja",
+                                               from_script="Jpan", to_script="Latn")
+for transliteration in transliteration_results:
+    sourceScript = transliteration.script
+    targetScript = transliteration.text
+    print(f"'{source_text}' was transliterated into {sourceScript} as {targetScript}.")
+```
+
+This code example produces the following result:
+
+```
+'こんにちは' was transliterated into Latn as Kon'nichiwa​.
+```
+
+>**Tip**: For more information about the **transliterate** method, see the [Azure Translator Python SDK documentation](https://learn.microsoft.com/en-us/python/api/azure-ai-translation-text/azure.ai.translation.text.texttranslationclient#azure-ai-translation-text-texttranslationclient-transliterate).
+
+### Translate speech
+
+Azure Speech in Foundry Tools provides multiple APIs that you can use to build speech-enabled applications and agents. The Speech Translation API enables you to build solutions that translate spoken input and return the translation as text or speech.
+
+#### Use Azure Speech translation in application code
+
+To support speech translation, Azure Speech provides an API that you can use from your application code through the **TranslationRecognizer** object; which you can create by connecting to your Azure Speech resource using a **SpeechTranslationConfig** object.
+
+##### Connect to an Azure Speech resource
+
+To use the Azure Speech Translation API in client code, you must use a **SpeechTranslationConfig** object to connect to an Azure Speech resource. Microsoft Foundry provides Azure Speech as a tool in a Foundry resource, and you can connect by specifying the relevant _endpoint_ or _region_ for your resource, as shown in this code example:
+
+```python
+import azure.cognitiveservices.speech as speech_sdk
+
+# Connect to a Foundry resource endpoint
+translation_cfg = speech_sdk.translation.SpeechTranslationConfig(
+                    subscription="FOUNDRY_KEY", endpoint="FOUNDRY_ENDPOINT")
+
+# Or connect using a region
+translation_cfg = speech_sdk.translation.SpeechTranslationConfig(
+                    subscription="FOUNDRY_KEY", region="FOUNDRY_REGION")
+
+```
+
+>**Tip**: For more information about the **SpeechTranslationConfig** constructor, see the [Azure Speech Python SDK documentation](https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.translation.speechtranslationconfig#constructor).
+
+##### Configure translation languages and input
+
+Azure Speech can translate spoken audio input to one or more languages. You use the **SpeechTranslationConfig** object to configure the source and target languages, and an **AudioConfig** object to specify the source audio stream.
+
+For example, the following code configures the **SpeechTranslationConfig** object for translation from US English (_en-US_) to French (_fr_) and Japanese (_ja_); and uses an **AudioConfig** object to specify the source audio as coming from the default system microphone.
+
+```python
+# Configure languages
+translation_cfg.speech_recognition_language = 'en-US'
+translation_cfg.add_target_language('fr')
+translation_cfg.add_target_language('ja')
+print('Ready to translate from',translation_cfg.speech_recognition_language)
+
+# Configure audio source
+audio_cfg = speech_sdk.AudioConfig(use_default_microphone=True)
+```
+
+>**Tip**: For more information about the **AudioConfig** class, see the [Azure Speech Python SDK documentation](https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.audio.audioconfig).
+
+##### Translate speech to text
+
+Now you're ready to translate spoken input using a **TranslationRecognizer** object, like this:
+
+```python
+# Get a TranslationRecognizr object
+translator = speech_sdk.translation.TranslationRecognizer(translation_config=translation_cfg,
+                                                          audio_config=audio_cfg)
+# Get input from mic and translate
+print("Speak now...")
+translation_results = translator.recognize_once_async().get()
+print(f"Translating '{translation_results.text}'")
+
+# Print each translation
+translations = translation_results.translations
+for translation_language in translations:
+    print(f"{translation_language}: '{translations[translation_language]}'")
+```
+
+Running this code and saying "hello" into the microphone results in the following output:
+
+```
+Speak now...
+Translating 'Hello.'
+fr: 'Bonjour.'
+ja: 'こんにちは。'
+```
+
+>**Tip**: For more information about the **TranslationRecognizer** class, see the [Azure Speech Python SDK documentation](https://learn.microsoft.com/en-us/python/api/azure-cognitiveservices-speech/azure.cognitiveservices.speech.translation.translationrecognizer).
+
+#### Synthesize translations as speech
+
+If you need to implement speech-to-speech translation, there are two common approaches you can choose from:
+
+##### Manual synthesis
+
+Manual synthesis is a straightforward way to synthesize the results of speech translation You can use manual synthesis to generate audio from text translations. It's essentially just the combination of two separate operations in which you:
+
+1. Use a **TranslationRecognizer** to translate spoken input into text transcriptions in one or more target languages.
+2. Iterate through the **Translations** in the result of the translation operation, using a **SpeechSynthesizer** to synthesize an audio stream for each language.
+
+For example, we could expand the previous example to use Azure Speech to synthesize each translation that is returned, like this:
+
+```python
+import azure.cognitiveservices.speech as speech_sdk
+
+# Configure translation
+translation_cfg = speech_sdk.translation.SpeechTranslationConfig(subscription="FOUNDRY_KEY",
+                                                                 endpoint="FOUNDRY_ENDPOINT")
+translation_cfg.speech_recognition_language = 'en-US'
+translation_cfg.add_target_language('fr')
+translation_cfg.add_target_language('ja')
+audio_cfg = speech_sdk.AudioConfig(use_default_microphone=True)
+
+# Configure speech synthesis
+speech_cfg = speech_sdk.SpeechConfig(subscription="FOUNDRY_KEY", 
+                                     endpoint="FOUNDRY_ENDPOINT")
+audio_out_cfg = speech_sdk.audio.AudioOutputConfig(use_default_speaker=True)
+voices = {
+        "fr": "fr-FR-HenriNeural",
+        "ja": "ja-JP-NanamiNeural"
+}
+
+# Get trsnslations
+translator = speech_sdk.translation.TranslationRecognizer(translation_config=translation_cfg,
+                                                          audio_config=audio_cfg)
+print("Speak now...")
+translation_results = translator.recognize_once_async().get()
+print(f"Translating '{translation_results.text}'")
+
+
+# process the translation results
+translations = translation_results.translations
+for translation_language in translations:
+
+    # Print ressults
+    print(f"{translation_language}: '{translations[translation_language]}'")
+
+    # Speak results
+    speech_cfg.speech_synthesis_voice_name = voices.get(translation_language)
+    speech_synthesizer = speech_sdk.SpeechSynthesizer(speech_cfg, audio_out_cfg)
+    speak = speech_synthesizer.speak_text_async(translations[translation_language]).get()
+
+    # CHeck for speech failure
+    if speak.reason != speech_sdk.ResultReason.SynthesizingAudioCompleted:
+        print(speak.reason)
+```
+
+Note that you need to create a **SpeechConfig** object for the speech synthesis API, and a separate **AudioConfig** to direct the spoken output to the default speaker. You can also specify language-specific voices to optimize pronunciation of the translated speech.
+
+##### Event-based synthesis
+
+When you want to perform 1:1 translation (translating from one source language into a single target language), you can use event-based synthesis to capture the translation as an audio stream. To do this, you need to:
+
+- Specify the desired voice for the translated speech in the **TranslationConfig**.
+- Create an event handler for the **TranslationRecognizer** object's **Synthesizing** event.
+- In the event handler, use the **GetAudio**() method of the **Result** parameter to retrieve the byte stream of translated audio.
+
+>**Note**: You can't use event-based synthesis for multi-language translation.
+
+For example, the following Python code uses an inline event handler to capture the translated audio stream and save it as a file. The code subsequently plays the file using the **playsound** library.
+
+```python
+import azure.cognitiveservices.speech as speech_sdk
+from playsound3 import playsound
+
+# Configure translation
+source_language, target_language = "en-US", "fr"
+output_file = "translation.wav"
+translation_cfg = speech_sdk.translation.SpeechTranslationConfig(subscription="FOUNDRY_KEY",
+                                                                 endpoint="FOUNDRY_ENDPOINT")
+translation_cfg.speech_recognition_language = source_language
+translation_cfg.add_target_language(target_language)
+translation_cfg.voice_name = "fr-FR-HenriNeural"
+audio_cfg = speech_sdk.AudioConfig(use_default_microphone=True)
+translator = speech_sdk.translation.TranslationRecognizer(translation_config=translation_cfg,
+                                                          audio_config=audio_cfg)
+
+# Event handler function to save the synthesized audio to a file
+def synthesis_callback(evt):
+    size = len(evt.result.audio)
+    print(f'Audio synthesized: {size} byte(s) {"(COMPLETED)" if size == 0 else ""}')
+
+    if size > 0:
+        file = open(output_file, 'wb+')
+        file.write(evt.result.audio)
+        file.close()
+
+# Connect the event handler function
+translator.synthesizing.connect(synthesis_callback)
+
+# Get input from mic and translate it
+print(f"Speak now (in {source_language})...")
+translation_results = translator.recognize_once()
+print(f"Translating '{translation_results.text}'")
+
+# Print and play the translation results
+print(translation_results.translations[target_language])
+playsound(output_file)
+```
+
+>**Tip**: For more information about synthesizing translations, see the [Azure Speech documentation](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-translate-speech?tabs=terminal&pivots=programming-language-python#synthesize-translations).
